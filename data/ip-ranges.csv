@@ -1,0 +1,8 @@
+# ip2country sample data
+# Format: start_ip,end_ip,country,city  (inclusive ranges, non-overlapping)
+# Lines beginning with '#' are comments. City may be empty; country is required.
+1.0.0.0,1.0.0.255,AU,Brisbane
+2.22.233.0,2.22.233.255,IL,Tel Aviv
+8.8.8.0,8.8.8.255,US,Mountain View
+9.9.9.0,9.9.9.255,US,Berkeley
+203.0.113.0,203.0.113.255,JP,Tokyo

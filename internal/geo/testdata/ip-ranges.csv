@@ -1,0 +1,6 @@
+# start_ip,end_ip,country,city
+# Deliberately not pre-sorted, to exercise the loader's sort step.
+8.8.8.0,8.8.8.255,US,Mountain View
+1.0.0.0,1.0.0.255,AU,Brisbane
+2.22.233.0,2.22.233.255,IL,Tel Aviv
+9.9.9.0,9.9.9.255,US,Berkeley

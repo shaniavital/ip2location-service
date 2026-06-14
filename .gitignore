@@ -1,0 +1,10 @@
+# Built binaries
+/bin/
+/ip2location-service
+
+# IDE
+/.idea/
+
+# Go
+*.test
+*.out
