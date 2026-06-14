@@ -75,6 +75,28 @@ curl -i 'localhost:8080/v1/find-country?ip=nope'           # 400
 Liveness probe returning `200 ok`. **Not** rate-limited (see design notes), so a
 load balancer's health check is never rejected under load.
 
+## Request flow
+
+How a request travels through the layers. Panic recovery wraps everything; only
+the API endpoint sits behind the rate-limit gate.
+
+```mermaid
+flowchart TD
+    C(["GET /v1/find-country?ip=8.8.8.8"]) --> S["http.Server (timeouts)"]
+    S --> RP["recoverPanic — any panic below becomes 500 JSON"]
+    RP --> MUX{"ServeMux: match method + path"}
+    MUX -->|"/healthz"| HZ["200 ok (not rate-limited)"]
+    MUX -->|"unknown path / wrong method"| RE["routeError → 404 / 405 JSON"]
+    MUX -->|"GET /v1/find-country"| GATE{"rateLimit: Allow?"}
+    GATE -->|"no"| R429["429 JSON + Retry-After"]
+    GATE -->|"yes"| H["findCountry"]
+    H -->|"ip missing or invalid"| B400["400 JSON"]
+    H --> FIND["locator.Find(ctx, ip) → csvStore binary search"]
+    FIND -->|"ErrNotFound"| NF["404 JSON"]
+    FIND -->|"other error"| E500["500 JSON (detail logged server-side)"]
+    FIND -->|"found"| OK["200 {country, city}"]
+```
+
 ## Datastore format & extensibility
 
 The active datastore is chosen by `DATASTORE_TYPE` and constructed by a factory
@@ -154,6 +176,42 @@ internal/httpapi           Handlers, JSON error helper, middleware (rate limit, 
   client gets a generic `500` message.
 - **Fail fast.** Bad config or a bad datastore stops the service at startup, not
   on the first request.
+
+### Component flows
+
+**Panic recovery** — a deferred `recover()` turns a handler panic into a 500
+instead of a dropped connection:
+
+```mermaid
+flowchart TD
+    REQ(["request"]) --> RP["recoverPanic (defer recover armed)"]
+    RP --> NEXT["next handler runs"]
+    NEXT -->|"no panic"| NORM["normal response"]
+    NEXT -->|"panic!"| REC["recover() catches the value"]
+    REC --> LOG["log the cause + write 500 JSON"]
+    LOG --> ALIVE(["connection stays alive"])
+```
+
+**Rate-limit gate** — asks the limiter and either passes through or returns 429:
+
+```mermaid
+flowchart TD
+    REQ(["request"]) --> G{"limiter.Allow()?"}
+    G -->|"true"| NEXT["handler runs"]
+    G -->|"false"| R429["429 + Retry-After (handler not called)"]
+```
+
+**Token bucket** — what `Allow()` decides. Tokens refill lazily (computed from
+elapsed time, not a background timer) up to a capacity:
+
+```mermaid
+flowchart TD
+    REFILL["refill: +RATE_LIMIT_RPS tokens/sec (capped at capacity)"] --> BUCKET[("token bucket")]
+    REQ(["request"]) --> CHECK{"tokens >= 1?"}
+    BUCKET --> CHECK
+    CHECK -->|"yes"| SPEND["take 1 token → allow"]
+    CHECK -->|"no"| DENY["deny → 429"]
+```
 
 ## Testing
 
