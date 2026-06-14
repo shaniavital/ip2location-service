@@ -142,8 +142,42 @@ func TestFindCountry_MethodNotAllowed(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/find-country?ip=8.8.8.8", nil)
 	api.ServeHTTP(rec, req)
 
-	// The method-aware ServeMux rejects non-GET automatically.
+	// Router-level errors still use the API's JSON error contract.
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusMethodNotAllowed)
+	}
+	if allow := rec.Header().Get("Allow"); allow != "GET, HEAD" {
+		t.Errorf("Allow = %q, want %q", allow, "GET, HEAD")
+	}
+	requireJSONError(t, rec)
+}
+
+func TestRouter_NotFoundReturnsJSON(t *testing.T) {
+	api := newTestAPI(stubLocator{})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/does-not-exist", nil)
+	api.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+	requireJSONError(t, rec)
+}
+
+func requireJSONError(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json; charset=utf-8" {
+		t.Fatalf("Content-Type = %q, want JSON", ct)
+	}
+	var got struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decoding error body %q: %v", rec.Body.String(), err)
+	}
+	if got.Error == "" {
+		t.Fatal("error body is empty, want a message")
 	}
 }

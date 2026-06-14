@@ -111,19 +111,54 @@ func TestRouter_LogsRequestStatus(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
 	}
 
-	var logged struct {
-		Msg    string  `json:"msg"`
-		Method string  `json:"method"`
-		Path   string  `json:"path"`
-		Status float64 `json:"status"` // JSON numbers decode to float64
-	}
-	if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &logged); err != nil {
-		t.Fatalf("decoding log line %q: %v", buf.String(), err)
-	}
+	logged := requireRequestLog(t, buf.Bytes())
 	if logged.Status != http.StatusNotFound {
 		t.Errorf("logged status = %v, want %d", logged.Status, http.StatusNotFound)
 	}
 	if logged.Method != http.MethodGet || logged.Path != "/v1/find-country" {
 		t.Errorf("logged method/path = %q %q, want GET /v1/find-country", logged.Method, logged.Path)
 	}
+}
+
+func TestRouter_LogsRecoveredPanicStatus(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, nil))
+
+	api := httpapi.NewAPI(panicLocator{}, logger)
+	router := httpapi.NewRouter(api, stubLimiter{allow: true}, logger)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/find-country?ip=8.8.8.8", nil)
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	logged := requireRequestLog(t, buf.Bytes())
+	if logged.Status != http.StatusInternalServerError {
+		t.Errorf("logged status = %v, want %d", logged.Status, http.StatusInternalServerError)
+	}
+}
+
+type requestLogLine struct {
+	Msg    string  `json:"msg"`
+	Method string  `json:"method"`
+	Path   string  `json:"path"`
+	Status float64 `json:"status"` // JSON numbers decode to float64
+}
+
+func requireRequestLog(t *testing.T, logs []byte) requestLogLine {
+	t.Helper()
+
+	for _, line := range bytes.Split(bytes.TrimSpace(logs), []byte("\n")) {
+		var logged requestLogLine
+		if err := json.Unmarshal(line, &logged); err != nil {
+			t.Fatalf("decoding log line %q: %v", string(line), err)
+		}
+		if logged.Msg == "http request" {
+			return logged
+		}
+	}
+	t.Fatalf("no request log line found in %q", string(logs))
+	return requestLogLine{}
 }

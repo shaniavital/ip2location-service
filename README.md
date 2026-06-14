@@ -29,6 +29,7 @@ SERVER_ADDR=:8080 \
 DATASTORE_TYPE=csv \
 DATASTORE_DSN=data/ip-ranges.csv \
 RATE_LIMIT_RPS=50 \
+RATE_LIMIT_BURST=50 \
 ./bin/server
 ```
 
@@ -46,7 +47,8 @@ required values cause the service to fail at startup rather than at request time
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `RATE_LIMIT_RPS` | **yes** | — | Global rate limit in requests/second. Must be `> 0` (fractions allowed, e.g. `0.5`). |
+| `RATE_LIMIT_RPS` | **yes** | — | Global refill rate in requests/second. Must be `> 0` (fractions allowed, e.g. `0.5`). |
+| `RATE_LIMIT_BURST` | no | `ceil(RATE_LIMIT_RPS)`, minimum `1` | Maximum burst size before refill time matters. Must be a positive integer. |
 | `DATASTORE_DSN` | yes (for `csv`) | — | Driver-specific source string. For `csv`, a file path. |
 | `DATASTORE_TYPE` | no | `csv` | Selects the datastore implementation ("driver"). |
 | `SERVER_ADDR` | no | `:8080` | Listen address. |
@@ -61,6 +63,8 @@ required values cause the service to fail at startup rather than at request time
 | `200` | IP resolved | `{"country":"IL","city":"Tel Aviv"}` |
 | `400` | `ip` missing or unparseable | `{"error":"invalid ip address"}` |
 | `404` | IP valid but not in any range | `{"error":"no location found for the given ip"}` |
+| `404` | Unknown path | `{"error":"not found"}` |
+| `405` | Unsupported method on a known path | `{"error":"method not allowed"}` |
 | `429` | Rate limit exceeded | `{"error":"rate limit exceeded"}` (with `Retry-After: 1`) |
 | `500` | Unexpected datastore error | `{"error":"internal server error"}` |
 
@@ -136,8 +140,9 @@ internal/httpapi           Handlers, JSON error helper, middleware, router
 ## Design notes
 
 - **Rate limiting — token bucket.** Tokens refill lazily at `RATE_LIMIT_RPS`
-  tokens/second up to a one-second burst capacity (floored at 1 so fractional
-  rates work). "Lazy" means no background goroutine: `Allow()` computes accrued
+  tokens/second up to `RATE_LIMIT_BURST` capacity. The default burst is one
+  second's worth of traffic, rounded up and floored at 1 so fractional rates
+  work. "Lazy" means no background goroutine: `Allow()` computes accrued
   tokens from elapsed time, making it `O(1)`. The clock is injectable, so
   time-based tests are deterministic (no `time.Sleep`). This is the approach the
   standard `golang.org/x/time/rate` uses — which the brief disallows, so it is
@@ -150,6 +155,8 @@ internal/httpapi           Handlers, JSON error helper, middleware, router
   traffic spike trip the limiter and cause an orchestrator to mark the instance
   unhealthy — an outage from load. So the limiter is applied per-route to the API
   endpoint only.
+- **JSON errors throughout.** Handler errors, rate-limit errors, unknown paths,
+  and unsupported methods all use the same `{"error":"..."}` shape.
 - **Errors don't leak internals.** A datastore failure is logged server-side; the
   client gets a generic `500` message.
 - **Fail fast.** Bad config or a bad datastore stops the service at startup, not
@@ -165,7 +172,7 @@ go test -race ./...        # the limiter has a concurrency test
 Coverage is table-driven and uses only the standard library (`testing`,
 `net/http/httptest`):
 
-- **config** — defaults, valid load, and every validation failure.
+- **config** — defaults, valid load, rate/burst validation, and every validation failure.
 - **geo** — range lookups (boundaries, gaps, below/above all ranges) and load-time
   rejection of malformed/overlapping data.
 - **ratelimit** — burst, refill-over-time, capacity cap, fractional rate, and a
@@ -181,10 +188,6 @@ golangci-lint run ./...
 
 ## Known limitations / what I'd add next
 
-- **404 (unknown path) and 405 (wrong method)** are produced by the standard
-  `ServeMux` and return plain-text bodies rather than the JSON error shape. Only
-  the documented `GET` endpoint is in scope; a catch-all JSON handler would close
-  this gap.
 - **Per-client rate limiting** (keyed by client IP, with eviction) — the seam is
   in place via the `Limiter` interface.
 - **IPv6 data** — the lookup uses `net/netip`, which supports IPv6; the sample

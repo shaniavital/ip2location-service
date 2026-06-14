@@ -54,7 +54,7 @@ func run() error {
 		}()
 	}
 
-	limiter := ratelimit.NewTokenBucket(cfg.RateLimitRPS)
+	limiter := ratelimit.NewTokenBucket(cfg.RateLimitRPS, ratelimit.WithCapacity(float64(cfg.RateLimitBurst)))
 	api := httpapi.NewAPI(locator, logger)
 	router := httpapi.NewRouter(api, limiter, logger)
 
@@ -81,6 +81,7 @@ func run() error {
 			"addr", cfg.ServerAddr,
 			"datastore", cfg.DatastoreType,
 			"rate_limit_rps", cfg.RateLimitRPS,
+			"rate_limit_burst", cfg.RateLimitBurst,
 		)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serverErr <- err

@@ -55,6 +55,16 @@ func TestTokenBucket_CapacityIsCapped(t *testing.T) {
 	}
 }
 
+func TestTokenBucket_CustomCapacity(t *testing.T) {
+	clk := newFakeClock()
+	b := ratelimit.NewTokenBucket(10, ratelimit.WithClock(clk.now), ratelimit.WithCapacity(3))
+
+	drain(t, b, 3)
+	if b.Allow() {
+		t.Fatal("4th request should be denied because custom capacity is 3")
+	}
+}
+
 func TestTokenBucket_FractionalRate(t *testing.T) {
 	clk := newFakeClock()
 	b := ratelimit.NewTokenBucket(0.5, ratelimit.WithClock(clk.now)) // one token every 2s
