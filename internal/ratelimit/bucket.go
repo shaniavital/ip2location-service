@@ -18,9 +18,9 @@ type TokenBucket struct {
 	mu         sync.Mutex
 	tokens     float64
 	capacity   float64
-	refillRate float64 // tokens per second; equals the configured requests/sec
-	last       time.Time
-	now        func() time.Time // time source; time.Now in production, a fake in tests
+	refillRate float64          // tokens per second; equals the configured requests/sec
+	lastRefill time.Time        // when tokens were last topped up
+	clock      func() time.Time // time source; time.Now in production, a fake in tests
 }
 
 // NewTokenBucket returns a limiter that permits ratePerSec requests/second.
@@ -34,7 +34,7 @@ func NewTokenBucket(ratePerSec float64) *TokenBucket {
 
 // newTokenBucket is the real constructor; the exported one fixes the clock to
 // time.Now, while tests pass a controllable clock for deterministic timing.
-func newTokenBucket(ratePerSec float64, now func() time.Time) *TokenBucket {
+func newTokenBucket(ratePerSec float64, clock func() time.Time) *TokenBucket {
 	capacity := ratePerSec
 	if capacity < 1 {
 		capacity = 1
@@ -43,8 +43,8 @@ func newTokenBucket(ratePerSec float64, now func() time.Time) *TokenBucket {
 		tokens:     capacity, // start full
 		capacity:   capacity,
 		refillRate: ratePerSec,
-		last:       now(),
-		now:        now,
+		lastRefill: clock(),
+		clock:      clock,
 	}
 }
 
@@ -53,10 +53,10 @@ func (b *TokenBucket) Allow() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	now := b.now()
-	if elapsed := now.Sub(b.last).Seconds(); elapsed > 0 {
+	now := b.clock()
+	if elapsed := now.Sub(b.lastRefill).Seconds(); elapsed > 0 {
 		b.tokens = min(b.capacity, b.tokens+elapsed*b.refillRate)
-		b.last = now
+		b.lastRefill = now
 	}
 
 	if b.tokens >= 1 {

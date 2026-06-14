@@ -37,13 +37,13 @@ type findCountryResponse struct {
 //	404 -> ip is valid but not in the datastore
 //	500 -> unexpected datastore error
 func (a *API) findCountry(w http.ResponseWriter, r *http.Request) {
-	raw := r.URL.Query().Get("ip")
-	if raw == "" {
+	rawIP := r.URL.Query().Get("ip")
+	if rawIP == "" {
 		writeError(w, http.StatusBadRequest, "missing required query parameter: ip")
 		return
 	}
 
-	ip, err := netip.ParseAddr(raw)
+	ip, err := netip.ParseAddr(rawIP)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid ip address")
 		return

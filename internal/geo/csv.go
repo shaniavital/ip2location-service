@@ -63,18 +63,18 @@ func newCSVStore(path string) (*csvStore, error) {
 // range whose start is <= ip, then confirms ip <= that range's end; if ip falls
 // in a gap between ranges (or outside all of them) it returns ErrNotFound.
 func (s *csvStore) Find(_ context.Context, ip netip.Addr) (Location, error) {
-	// i is the position of the first row with start >= ip. The candidate range
-	// (largest start <= ip) is therefore at i (exact start match) or i-1.
-	i, exact := slices.BinarySearchFunc(s.rows, ip, func(r rangeRow, target netip.Addr) int {
+	// pos is the position of the first row with start >= ip. The candidate range
+	// (largest start <= ip) is therefore at pos (exact start match) or pos-1.
+	pos, exactStart := slices.BinarySearchFunc(s.rows, ip, func(r rangeRow, target netip.Addr) int {
 		return r.start.Compare(target)
 	})
 
-	idx := i
-	if !exact {
-		if i == 0 {
+	idx := pos
+	if !exactStart {
+		if pos == 0 {
 			return Location{}, ErrNotFound // ip is below every range
 		}
-		idx = i - 1
+		idx = pos - 1
 	}
 
 	row := s.rows[idx]

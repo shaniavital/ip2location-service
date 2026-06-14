@@ -35,14 +35,14 @@ func recoverPanic(logger *slog.Logger, next http.Handler) http.Handler {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
-			rv := recover()
-			if rv == nil {
+			recovered := recover()
+			if recovered == nil {
 				return
 			}
-			if rv == http.ErrAbortHandler {
-				panic(rv) // let the server handle its own abort sentinel
+			if recovered == http.ErrAbortHandler {
+				panic(recovered) // let the server handle its own abort sentinel
 			}
-			logger.Error("recovered from panic", "panic", rv, "method", r.Method, "path", r.URL.Path)
+			logger.Error("recovered from panic", "panic", recovered, "method", r.Method, "path", r.URL.Path)
 			writeError(w, http.StatusInternalServerError, "internal server error")
 		}()
 		next.ServeHTTP(w, r)
