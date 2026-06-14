@@ -3,7 +3,6 @@ package httpapi
 import (
 	"log/slog"
 	"net/http"
-	"time"
 )
 
 // Limiter is the rate-limiting contract the middleware depends on. It is
@@ -44,58 +43,8 @@ func recoverPanic(logger *slog.Logger, next http.Handler) http.Handler {
 				panic(rv) // let the server handle its own abort sentinel
 			}
 			logger.Error("recovered from panic", "panic", rv, "method", r.Method, "path", r.URL.Path)
-			if rec, ok := w.(*statusRecorder); ok && rec.wrote {
-				return
-			}
 			writeError(w, http.StatusInternalServerError, "internal server error")
 		}()
 		next.ServeHTTP(w, r)
 	})
-}
-
-// requestLog emits one structured log line per request, including the response
-// status and the time taken.
-func requestLog(logger *slog.Logger, next http.Handler) http.Handler {
-	if logger == nil {
-		logger = slog.Default()
-	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-
-		next.ServeHTTP(rec, r)
-
-		logger.Info("http request",
-			"method", r.Method,
-			"path", r.URL.Path,
-			"status", rec.status,
-			"duration", time.Since(start),
-			"remote_addr", r.RemoteAddr,
-		)
-	})
-}
-
-// statusRecorder wraps http.ResponseWriter to capture the status code, which is
-// otherwise not readable after it's written. It defaults to 200, matching the
-// net/http behavior where a Write without an explicit WriteHeader implies 200.
-type statusRecorder struct {
-	http.ResponseWriter
-	status int
-	wrote  bool
-}
-
-func (r *statusRecorder) WriteHeader(code int) {
-	if r.wrote {
-		return
-	}
-	r.status = code
-	r.wrote = true
-	r.ResponseWriter.WriteHeader(code)
-}
-
-func (r *statusRecorder) Write(b []byte) (int, error) {
-	if !r.wrote {
-		r.WriteHeader(http.StatusOK)
-	}
-	return r.ResponseWriter.Write(b)
 }

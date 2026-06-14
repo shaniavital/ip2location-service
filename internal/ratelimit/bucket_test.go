@@ -1,17 +1,15 @@
-package ratelimit_test
+package ratelimit
 
 import (
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/shaniavital/ip2location-service/internal/ratelimit"
 )
 
 func TestTokenBucket_InitialBurst(t *testing.T) {
 	clk := newFakeClock()
-	b := ratelimit.NewTokenBucket(5, ratelimit.WithClock(clk.now))
+	b := newTokenBucket(5, clk.now)
 
 	// Starts full: the first 5 requests succeed, the 6th is denied because no
 	// time has passed to refill anything.
@@ -23,7 +21,7 @@ func TestTokenBucket_InitialBurst(t *testing.T) {
 
 func TestTokenBucket_RefillOverTime(t *testing.T) {
 	clk := newFakeClock()
-	b := ratelimit.NewTokenBucket(5, ratelimit.WithClock(clk.now)) // 5 tokens/sec
+	b := newTokenBucket(5, clk.now) // 5 tokens/sec
 
 	drain(t, b, 5)
 	if b.Allow() {
@@ -44,7 +42,7 @@ func TestTokenBucket_RefillOverTime(t *testing.T) {
 
 func TestTokenBucket_CapacityIsCapped(t *testing.T) {
 	clk := newFakeClock()
-	b := ratelimit.NewTokenBucket(5, ratelimit.WithClock(clk.now))
+	b := newTokenBucket(5, clk.now)
 
 	drain(t, b, 5)
 	clk.advance(100 * time.Second) // would be 500 tokens, but capacity caps at 5
@@ -55,19 +53,9 @@ func TestTokenBucket_CapacityIsCapped(t *testing.T) {
 	}
 }
 
-func TestTokenBucket_CustomCapacity(t *testing.T) {
-	clk := newFakeClock()
-	b := ratelimit.NewTokenBucket(10, ratelimit.WithClock(clk.now), ratelimit.WithCapacity(3))
-
-	drain(t, b, 3)
-	if b.Allow() {
-		t.Fatal("4th request should be denied because custom capacity is 3")
-	}
-}
-
 func TestTokenBucket_FractionalRate(t *testing.T) {
 	clk := newFakeClock()
-	b := ratelimit.NewTokenBucket(0.5, ratelimit.WithClock(clk.now)) // one token every 2s
+	b := newTokenBucket(0.5, clk.now) // one token every 2s
 
 	if !b.Allow() {
 		t.Fatal("first request should use the initial token")
@@ -92,7 +80,7 @@ func TestTokenBucket_FractionalRate(t *testing.T) {
 func TestTokenBucket_ConcurrentAllow(t *testing.T) {
 	clk := newFakeClock() // never advances
 	const capacity = 100
-	b := ratelimit.NewTokenBucket(capacity, ratelimit.WithClock(clk.now))
+	b := newTokenBucket(capacity, clk.now)
 
 	var allowed int64
 	var wg sync.WaitGroup
@@ -113,7 +101,7 @@ func TestTokenBucket_ConcurrentAllow(t *testing.T) {
 }
 
 // drain asserts that the next n requests are all allowed.
-func drain(t *testing.T, b *ratelimit.TokenBucket, n int) {
+func drain(t *testing.T, b *TokenBucket, n int) {
 	t.Helper()
 	for i := range n {
 		if !b.Allow() {
@@ -122,9 +110,7 @@ func drain(t *testing.T, b *ratelimit.TokenBucket, n int) {
 	}
 }
 
-// fakeClock is a manually-advanced time source for deterministic tests. It is
-// safe for concurrent use because the concurrency test reads it from many
-// goroutines.
+// fakeClock is a manually-advanced time source for deterministic tests.
 type fakeClock struct {
 	mu sync.Mutex
 	t  time.Time

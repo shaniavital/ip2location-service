@@ -1,90 +1,47 @@
-// Package config loads and validates the service configuration from
-// environment variables (12-factor style), applying defaults and failing fast
-// when a required value is missing or invalid.
+// Package config loads the service configuration from environment variables,
+// applying defaults and failing fast when a required value is missing or invalid.
 package config
 
 import (
-	"errors"
 	"fmt"
-	"math"
 	"os"
 	"strconv"
-	"time"
 )
 
 const (
-	defaultServerAddr      = ":8080"
-	defaultDatastoreType   = "csv"
-	defaultShutdownTimeout = 10 * time.Second
+	defaultServerAddr    = ":8080"
+	defaultDatastoreType = "csv"
 )
 
-// Config holds the fully-resolved service configuration. All fields are
-// comparable, which keeps tests simple (a plain == against the expected value).
+// Config holds the resolved service configuration.
 type Config struct {
-	ServerAddr      string        // listen address, e.g. ":8080"
-	DatastoreType   string        // selects the Locator implementation (the "driver")
-	DatastoreDSN    string        // opaque, driver-specific source string (a path for csv, a connection URL for a DB)
-	RateLimitRPS    float64       // global rate limit in requests/sec; must be > 0
-	RateLimitBurst  int           // maximum burst size; defaults to one second's worth of traffic
-	ShutdownTimeout time.Duration // grace period for draining in-flight requests
+	ServerAddr    string  // listen address, e.g. ":8080"
+	DatastoreType string  // selects the datastore implementation (the "driver")
+	DatastoreDSN  string  // driver-specific source string (a file path for csv)
+	RateLimitRPS  float64 // rate limit in requests/sec; must be > 0
 }
 
-// Load reads configuration from the environment, applies defaults, and
-// validates the result. It aggregates every problem it finds into a single
-// error so the operator sees all misconfiguration at once instead of fixing
-// them one boot at a time.
-//
-// Datastore-specific validation (e.g. that the path exists) is deliberately
-// left to the datastore implementation, which knows its own requirements.
+// Load reads configuration from the environment and validates it. It returns an
+// error (and the service refuses to start) if a required value is missing or
+// invalid, so misconfiguration is caught at startup rather than at request time.
 func Load() (Config, error) {
 	cfg := Config{
-		ServerAddr:      getEnv("SERVER_ADDR", defaultServerAddr),
-		DatastoreType:   getEnv("DATASTORE_TYPE", defaultDatastoreType),
-		DatastoreDSN:    getEnv("DATASTORE_DSN", ""),
-		ShutdownTimeout: defaultShutdownTimeout,
+		ServerAddr:    getEnv("SERVER_ADDR", defaultServerAddr),
+		DatastoreType: getEnv("DATASTORE_TYPE", defaultDatastoreType),
+		DatastoreDSN:  getEnv("DATASTORE_DSN", ""),
 	}
 
-	var errs []error
-
-	// RATE_LIMIT_RPS is required and must be positive. We model it as a float so
-	// the limiter stays fully general (e.g. 0.5 == one request every two seconds).
+	// RATE_LIMIT_RPS is required and must be positive. It is a float so the
+	// limiter can express fractional rates (e.g. 0.5 == one request every 2s).
 	rps, err := requireFloat("RATE_LIMIT_RPS")
-	switch {
-	case err != nil:
-		errs = append(errs, err)
-	case math.IsNaN(rps) || math.IsInf(rps, 0):
-		errs = append(errs, fmt.Errorf("RATE_LIMIT_RPS must be finite, got %v", rps))
-	case rps <= 0:
-		errs = append(errs, fmt.Errorf("RATE_LIMIT_RPS must be > 0, got %v", rps))
-	default:
-		cfg.RateLimitRPS = rps
-		cfg.RateLimitBurst = defaultBurst(rps)
+	if err != nil {
+		return Config{}, err
 	}
+	if rps <= 0 {
+		return Config{}, fmt.Errorf("RATE_LIMIT_RPS must be > 0, got %v", rps)
+	}
+	cfg.RateLimitRPS = rps
 
-	// RATE_LIMIT_BURST is optional. When omitted, the bucket allows one second of
-	// burst headroom; configuring it separately makes the limiter's semantics
-	// explicit: RPS is refill speed, burst is capacity.
-	if burst, ok, err := optionalPositiveInt("RATE_LIMIT_BURST"); err != nil {
-		errs = append(errs, err)
-	} else if ok {
-		cfg.RateLimitBurst = burst
-	}
-
-	// SHUTDOWN_TIMEOUT is optional; when set it must be a positive duration.
-	if v, ok := os.LookupEnv("SHUTDOWN_TIMEOUT"); ok && v != "" {
-		switch d, err := time.ParseDuration(v); {
-		case err != nil:
-			errs = append(errs, fmt.Errorf("SHUTDOWN_TIMEOUT %q is not a valid duration: %w", v, err))
-		case d <= 0:
-			errs = append(errs, fmt.Errorf("SHUTDOWN_TIMEOUT must be > 0, got %v", d))
-		default:
-			cfg.ShutdownTimeout = d
-		}
-	}
-
-	if len(errs) > 0 {
-		return Config{}, errors.Join(errs...)
-	}
 	return cfg, nil
 }
 
@@ -107,26 +64,4 @@ func requireFloat(key string) (float64, error) {
 		return 0, fmt.Errorf("%s %q is not a number: %w", key, v, err)
 	}
 	return f, nil
-}
-
-func optionalPositiveInt(key string) (int, bool, error) {
-	v, ok := os.LookupEnv(key)
-	if !ok || v == "" {
-		return 0, false, nil
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil {
-		return 0, true, fmt.Errorf("%s %q is not an integer: %w", key, v, err)
-	}
-	if n <= 0 {
-		return 0, true, fmt.Errorf("%s must be > 0, got %d", key, n)
-	}
-	return n, true, nil
-}
-
-func defaultBurst(rps float64) int {
-	if rps < 1 {
-		return 1
-	}
-	return int(math.Ceil(rps))
 }

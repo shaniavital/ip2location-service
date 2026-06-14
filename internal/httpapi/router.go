@@ -12,18 +12,15 @@ import (
 // deliberately left unlimited so that a load balancer's health probe is never
 // rejected under load (which would wrongly pull a busy-but-healthy instance out
 // of rotation). A catch-all handler keeps router-level 404/405 errors in the
-// same JSON error shape as the API handlers. requestLog wraps recoverPanic so
-// recovered panics are logged with the final status.
+// same JSON error shape as the API handlers. recoverPanic wraps everything so a
+// panic in any handler becomes a 500 instead of a dropped connection.
 func NewRouter(api *API, limiter Limiter, logger *slog.Logger) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /v1/find-country", rateLimit(limiter, http.HandlerFunc(api.findCountry)))
 	mux.Handle("GET /healthz", http.HandlerFunc(api.healthz))
 	mux.HandleFunc("/", routeError)
 
-	var h http.Handler = mux
-	h = recoverPanic(logger, h)
-	h = requestLog(logger, h)
-	return h
+	return recoverPanic(logger, mux)
 }
 
 func routeError(w http.ResponseWriter, r *http.Request) {

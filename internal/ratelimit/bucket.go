@@ -10,66 +10,42 @@ import (
 
 // TokenBucket is a thread-safe token-bucket limiter.
 //
-// Tokens accrue continuously at refillRate (tokens/second) up to capacity, and
-// each allowed request spends one. Refill is "lazy": rather than running a
-// background ticker, Allow computes how many tokens have accrued since the last
-// call. That keeps it O(1) in time and memory with no goroutines.
+// Tokens refill at refillRate (tokens/second) up to capacity, and each allowed
+// request spends one. Refill is "lazy": instead of a background ticker, Allow
+// computes how many tokens have accrued since the last call from the elapsed
+// time. That keeps it O(1) with no goroutines.
 type TokenBucket struct {
 	mu         sync.Mutex
 	tokens     float64
 	capacity   float64
 	refillRate float64 // tokens per second; equals the configured requests/sec
 	last       time.Time
-	now        func() time.Time // time source; injectable so tests can control it
-}
-
-// Option customizes a TokenBucket at construction.
-type Option func(*TokenBucket)
-
-// WithClock overrides the time source. Tests use it to advance time
-// deterministically instead of sleeping, which makes time-based assertions
-// exact and fast rather than flaky.
-func WithClock(now func() time.Time) Option {
-	return func(b *TokenBucket) { b.now = now }
-}
-
-// WithCapacity overrides the maximum number of tokens the bucket can hold. It is
-// the limiter's burst size: once the bucket is full, that many requests can pass
-// immediately before refill time matters.
-func WithCapacity(capacity float64) Option {
-	return func(b *TokenBucket) {
-		b.capacity = capacity
-		if b.capacity < 1 {
-			b.capacity = 1
-		}
-	}
+	now        func() time.Time // time source; time.Now in production, a fake in tests
 }
 
 // NewTokenBucket returns a limiter that permits ratePerSec requests/second.
 //
-// The default burst capacity is one second's worth of tokens (ratePerSec), with
-// a floor of 1 so that fractional rates still work — e.g. a rate of 0.5
-// accumulates a single token every two seconds rather than never reaching one.
-// WithCapacity can override that default. The bucket starts full, allowing an
-// initial burst up to capacity.
-func NewTokenBucket(ratePerSec float64, opts ...Option) *TokenBucket {
+// Capacity (the burst size) is one second's worth of tokens, floored at 1 so
+// fractional rates still work — a rate of 0.5 accrues one token every two
+// seconds rather than never reaching one. The bucket starts full.
+func NewTokenBucket(ratePerSec float64) *TokenBucket {
+	return newTokenBucket(ratePerSec, time.Now)
+}
+
+// newTokenBucket is the real constructor; the exported one fixes the clock to
+// time.Now, while tests pass a controllable clock for deterministic timing.
+func newTokenBucket(ratePerSec float64, now func() time.Time) *TokenBucket {
 	capacity := ratePerSec
 	if capacity < 1 {
 		capacity = 1
 	}
-
-	b := &TokenBucket{
+	return &TokenBucket{
+		tokens:     capacity, // start full
 		capacity:   capacity,
 		refillRate: ratePerSec,
-		now:        time.Now,
+		last:       now(),
+		now:        now,
 	}
-	for _, opt := range opts {
-		opt(b)
-	}
-
-	b.tokens = b.capacity // start full
-	b.last = b.now()
-	return b
 }
 
 // Allow reports whether a request may proceed, consuming one token if so.

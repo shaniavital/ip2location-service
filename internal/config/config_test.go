@@ -2,23 +2,15 @@ package config_test
 
 import (
 	"testing"
-	"time"
 
 	"github.com/shaniavital/ip2location-service/internal/config"
 )
 
 func TestLoad(t *testing.T) {
-	// Every variable Load looks at. Each subtest sets all of them explicitly
-	// (absent keys become ""), so the result never depends on the host's
-	// real environment. An empty value is treated as "unset" by Load.
-	keys := []string{
-		"SERVER_ADDR",
-		"DATASTORE_TYPE",
-		"DATASTORE_DSN",
-		"RATE_LIMIT_RPS",
-		"RATE_LIMIT_BURST",
-		"SHUTDOWN_TIMEOUT",
-	}
+	// Every variable Load reads. Each subtest sets all of them explicitly
+	// (absent keys become ""), so the result never depends on the host's real
+	// environment. An empty value is treated as "unset" by Load.
+	keys := []string{"SERVER_ADDR", "DATASTORE_TYPE", "DATASTORE_DSN", "RATE_LIMIT_RPS"}
 
 	tests := []struct {
 		name    string
@@ -29,111 +21,40 @@ func TestLoad(t *testing.T) {
 		{
 			name: "valid full config",
 			env: map[string]string{
-				"SERVER_ADDR":      ":9090",
-				"DATASTORE_TYPE":   "csv",
-				"DATASTORE_DSN":    "/data/ip.csv",
-				"RATE_LIMIT_RPS":   "100",
-				"RATE_LIMIT_BURST": "25",
-				"SHUTDOWN_TIMEOUT": "5s",
+				"SERVER_ADDR":    ":9090",
+				"DATASTORE_TYPE": "csv",
+				"DATASTORE_DSN":  "/data/ip.csv",
+				"RATE_LIMIT_RPS": "100",
 			},
 			want: config.Config{
-				ServerAddr:      ":9090",
-				DatastoreType:   "csv",
-				DatastoreDSN:    "/data/ip.csv",
-				RateLimitRPS:    100,
-				RateLimitBurst:  25,
-				ShutdownTimeout: 5 * time.Second,
+				ServerAddr:    ":9090",
+				DatastoreType: "csv",
+				DatastoreDSN:  "/data/ip.csv",
+				RateLimitRPS:  100,
 			},
 		},
 		{
 			name: "defaults applied when only required var is set",
 			env:  map[string]string{"RATE_LIMIT_RPS": "50"},
 			want: config.Config{
-				ServerAddr:      ":8080",
-				DatastoreType:   "csv",
-				DatastoreDSN:    "",
-				RateLimitRPS:    50,
-				RateLimitBurst:  50,
-				ShutdownTimeout: 10 * time.Second,
+				ServerAddr:    ":8080",
+				DatastoreType: "csv",
+				RateLimitRPS:  50,
 			},
 		},
 		{
 			name: "fractional rate is allowed",
 			env:  map[string]string{"RATE_LIMIT_RPS": "0.5"},
 			want: config.Config{
-				ServerAddr:      ":8080",
-				DatastoreType:   "csv",
-				RateLimitRPS:    0.5,
-				RateLimitBurst:  1,
-				ShutdownTimeout: 10 * time.Second,
+				ServerAddr:    ":8080",
+				DatastoreType: "csv",
+				RateLimitRPS:  0.5,
 			},
 		},
-		{
-			name: "default burst rounds fractional rps up",
-			env:  map[string]string{"RATE_LIMIT_RPS": "1.5"},
-			want: config.Config{
-				ServerAddr:      ":8080",
-				DatastoreType:   "csv",
-				RateLimitRPS:    1.5,
-				RateLimitBurst:  2,
-				ShutdownTimeout: 10 * time.Second,
-			},
-		},
-		{
-			name:    "missing required rate limit",
-			env:     map[string]string{},
-			wantErr: true,
-		},
-		{
-			name:    "rate limit not a number",
-			env:     map[string]string{"RATE_LIMIT_RPS": "abc"},
-			wantErr: true,
-		},
-		{
-			name:    "rate limit NaN",
-			env:     map[string]string{"RATE_LIMIT_RPS": "NaN"},
-			wantErr: true,
-		},
-		{
-			name:    "rate limit infinity",
-			env:     map[string]string{"RATE_LIMIT_RPS": "+Inf"},
-			wantErr: true,
-		},
-		{
-			name:    "rate limit zero",
-			env:     map[string]string{"RATE_LIMIT_RPS": "0"},
-			wantErr: true,
-		},
-		{
-			name:    "rate limit negative",
-			env:     map[string]string{"RATE_LIMIT_RPS": "-5"},
-			wantErr: true,
-		},
-		{
-			name:    "burst not an integer",
-			env:     map[string]string{"RATE_LIMIT_RPS": "10", "RATE_LIMIT_BURST": "1.5"},
-			wantErr: true,
-		},
-		{
-			name:    "burst zero",
-			env:     map[string]string{"RATE_LIMIT_RPS": "10", "RATE_LIMIT_BURST": "0"},
-			wantErr: true,
-		},
-		{
-			name:    "burst negative",
-			env:     map[string]string{"RATE_LIMIT_RPS": "10", "RATE_LIMIT_BURST": "-2"},
-			wantErr: true,
-		},
-		{
-			name:    "invalid shutdown timeout",
-			env:     map[string]string{"RATE_LIMIT_RPS": "10", "SHUTDOWN_TIMEOUT": "soon"},
-			wantErr: true,
-		},
-		{
-			name:    "non-positive shutdown timeout",
-			env:     map[string]string{"RATE_LIMIT_RPS": "10", "SHUTDOWN_TIMEOUT": "0s"},
-			wantErr: true,
-		},
+		{name: "missing required rate limit", env: map[string]string{}, wantErr: true},
+		{name: "rate limit not a number", env: map[string]string{"RATE_LIMIT_RPS": "abc"}, wantErr: true},
+		{name: "rate limit zero", env: map[string]string{"RATE_LIMIT_RPS": "0"}, wantErr: true},
+		{name: "rate limit negative", env: map[string]string{"RATE_LIMIT_RPS": "-5"}, wantErr: true},
 	}
 
 	for _, tt := range tests {
