@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>IP → Location</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 32rem; margin: 4rem auto; padding: 0 1rem; color: #222; }
+    h1 { font-size: 1.4rem; }
+    form { display: flex; gap: .5rem; margin: 1.5rem 0; }
+    input { flex: 1; padding: .6rem .7rem; font-size: 1rem; border: 1px solid #ccc; border-radius: .4rem; }
+    button { padding: .6rem 1.1rem; font-size: 1rem; border: 0; border-radius: .4rem; background: #2563eb; color: #fff; cursor: pointer; }
+    button:hover { background: #1d4ed8; }
+    #result { padding: 1rem; border-radius: .5rem; min-height: 1.2rem; }
+    #result.ok  { background: #ecfdf5; border: 1px solid #34d399; }
+    #result.err { background: #fef2f2; border: 1px solid #f87171; }
+    .country { font-size: 1.3rem; font-weight: 600; }
+    .city { color: #555; }
+    .hint { color: #888; font-size: .85rem; }
+  </style>
+</head>
+<body>
+  <h1>IP → Location</h1>
+  <p class="hint">Enter an IP address to look up its country and city.</p>
+
+  <form id="form">
+    <input id="ip" type="text" placeholder="e.g. 8.8.8.8" autofocus>
+    <button type="submit">Find</button>
+  </form>
+
+  <div id="result"></div>
+
+  <script>
+    const form = document.getElementById("form");
+    const result = document.getElementById("result");
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const ip = document.getElementById("ip").value.trim();
+
+      result.className = "";
+      result.textContent = "Looking up…";
+
+      try {
+        const resp = await fetch("/v1/find-country?ip=" + encodeURIComponent(ip));
+        const data = await resp.json();
+
+        if (resp.ok) {
+          result.className = "ok";
+          result.innerHTML =
+            '<div class="country"></div><div class="city"></div>';
+          result.querySelector(".country").textContent = data.country;
+          result.querySelector(".city").textContent = data.city || "(no city)";
+        } else {
+          result.className = "err";
+          result.textContent = "Error " + resp.status + ": " + (data.error || "unknown error");
+        }
+      } catch (err) {
+        result.className = "err";
+        result.textContent = "Request failed: " + err.message;
+      }
+    });
+  </script>
+</body>
+</html>

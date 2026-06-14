@@ -16,6 +16,7 @@ import (
 // panic in any handler becomes a 500 instead of a dropped connection.
 func NewRouter(api *API, limiter Limiter, logger *slog.Logger) http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /{$}", serveIndex) // the UI; "{$}" matches only the exact root path
 	mux.Handle("GET /v1/find-country", rateLimit(limiter, http.HandlerFunc(api.findCountry)))
 	mux.Handle("GET /healthz", http.HandlerFunc(api.healthz))
 	mux.HandleFunc("/", routeError)

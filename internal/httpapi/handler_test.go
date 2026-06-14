@@ -165,6 +165,24 @@ func TestRouter_NotFoundReturnsJSON(t *testing.T) {
 	requireJSONError(t, rec)
 }
 
+func TestServeIndex(t *testing.T) {
+	api := newTestAPI(stubLocator{})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	api.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "text/html; charset=utf-8" {
+		t.Errorf("Content-Type = %q, want HTML", ct)
+	}
+	if rec.Body.Len() == 0 {
+		t.Error("expected a non-empty HTML body")
+	}
+}
+
 func requireJSONError(t *testing.T, rec *httptest.ResponseRecorder) {
 	t.Helper()
 

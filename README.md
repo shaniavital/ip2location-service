@@ -11,6 +11,7 @@ extend to different ip2country databases**, and a **hand-rolled rate limiter**
 - Pluggable datastore behind a `Locator` interface, selected by an environment variable.
 - Token-bucket rate limiter written from scratch, configured by an environment variable.
 - Production touches: structured logging (`log/slog`), HTTP server timeouts, panic recovery.
+- A tiny built-in web UI at `/` for interactive lookups (a single HTML page embedded in the binary).
 - **Zero external dependencies** — standard library only, including the tests.
 
 ## Requirements
@@ -37,6 +38,8 @@ Then:
 curl 'localhost:8080/v1/find-country?ip=8.8.8.8'
 # {"country":"US","city":"Mountain View"}
 ```
+
+Or open <http://localhost:8080> in a browser for a minimal lookup UI.
 
 ## Configuration
 
