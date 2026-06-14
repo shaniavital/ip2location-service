@@ -6,6 +6,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"time"
@@ -24,6 +25,7 @@ type Config struct {
 	DatastoreType   string        // selects the Locator implementation (the "driver")
 	DatastoreDSN    string        // opaque, driver-specific source string (a path for csv, a connection URL for a DB)
 	RateLimitRPS    float64       // global rate limit in requests/sec; must be > 0
+	RateLimitBurst  int           // maximum burst size; defaults to one second's worth of traffic
 	ShutdownTimeout time.Duration // grace period for draining in-flight requests
 }
 
@@ -50,10 +52,22 @@ func Load() (Config, error) {
 	switch {
 	case err != nil:
 		errs = append(errs, err)
+	case math.IsNaN(rps) || math.IsInf(rps, 0):
+		errs = append(errs, fmt.Errorf("RATE_LIMIT_RPS must be finite, got %v", rps))
 	case rps <= 0:
 		errs = append(errs, fmt.Errorf("RATE_LIMIT_RPS must be > 0, got %v", rps))
 	default:
 		cfg.RateLimitRPS = rps
+		cfg.RateLimitBurst = defaultBurst(rps)
+	}
+
+	// RATE_LIMIT_BURST is optional. When omitted, the bucket allows one second of
+	// burst headroom; configuring it separately makes the limiter's semantics
+	// explicit: RPS is refill speed, burst is capacity.
+	if burst, ok, err := optionalPositiveInt("RATE_LIMIT_BURST"); err != nil {
+		errs = append(errs, err)
+	} else if ok {
+		cfg.RateLimitBurst = burst
 	}
 
 	// SHUTDOWN_TIMEOUT is optional; when set it must be a positive duration.
@@ -93,4 +107,26 @@ func requireFloat(key string) (float64, error) {
 		return 0, fmt.Errorf("%s %q is not a number: %w", key, v, err)
 	}
 	return f, nil
+}
+
+func optionalPositiveInt(key string) (int, bool, error) {
+	v, ok := os.LookupEnv(key)
+	if !ok || v == "" {
+		return 0, false, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return 0, true, fmt.Errorf("%s %q is not an integer: %w", key, v, err)
+	}
+	if n <= 0 {
+		return 0, true, fmt.Errorf("%s must be > 0, got %d", key, n)
+	}
+	return n, true, nil
+}
+
+func defaultBurst(rps float64) int {
+	if rps < 1 {
+		return 1
+	}
+	return int(math.Ceil(rps))
 }

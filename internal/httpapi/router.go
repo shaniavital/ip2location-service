@@ -11,16 +11,27 @@ import (
 // The rate limiter is applied per-route to the API endpoint only: /healthz is
 // deliberately left unlimited so that a load balancer's health probe is never
 // rejected under load (which would wrongly pull a busy-but-healthy instance out
-// of rotation). recoverPanic and requestLog wrap every route — so health checks
-// are still logged, and the access log records rate-limited 429s. Method-aware
-// patterns (Go 1.22+) yield 405/404 automatically for the wrong method or path.
+// of rotation). A catch-all handler keeps router-level 404/405 errors in the
+// same JSON error shape as the API handlers. requestLog wraps recoverPanic so
+// recovered panics are logged with the final status.
 func NewRouter(api *API, limiter Limiter, logger *slog.Logger) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /v1/find-country", rateLimit(limiter, http.HandlerFunc(api.findCountry)))
 	mux.Handle("GET /healthz", http.HandlerFunc(api.healthz))
+	mux.HandleFunc("/", routeError)
 
 	var h http.Handler = mux
-	h = requestLog(logger, h)
 	h = recoverPanic(logger, h)
+	h = requestLog(logger, h)
 	return h
+}
+
+func routeError(w http.ResponseWriter, r *http.Request) {
+	switch r.URL.Path {
+	case "/v1/find-country", "/healthz":
+		w.Header().Set("Allow", "GET, HEAD")
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	default:
+		writeError(w, http.StatusNotFound, "not found")
+	}
 }

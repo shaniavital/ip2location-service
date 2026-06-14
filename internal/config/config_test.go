@@ -16,6 +16,7 @@ func TestLoad(t *testing.T) {
 		"DATASTORE_TYPE",
 		"DATASTORE_DSN",
 		"RATE_LIMIT_RPS",
+		"RATE_LIMIT_BURST",
 		"SHUTDOWN_TIMEOUT",
 	}
 
@@ -32,6 +33,7 @@ func TestLoad(t *testing.T) {
 				"DATASTORE_TYPE":   "csv",
 				"DATASTORE_DSN":    "/data/ip.csv",
 				"RATE_LIMIT_RPS":   "100",
+				"RATE_LIMIT_BURST": "25",
 				"SHUTDOWN_TIMEOUT": "5s",
 			},
 			want: config.Config{
@@ -39,6 +41,7 @@ func TestLoad(t *testing.T) {
 				DatastoreType:   "csv",
 				DatastoreDSN:    "/data/ip.csv",
 				RateLimitRPS:    100,
+				RateLimitBurst:  25,
 				ShutdownTimeout: 5 * time.Second,
 			},
 		},
@@ -50,6 +53,7 @@ func TestLoad(t *testing.T) {
 				DatastoreType:   "csv",
 				DatastoreDSN:    "",
 				RateLimitRPS:    50,
+				RateLimitBurst:  50,
 				ShutdownTimeout: 10 * time.Second,
 			},
 		},
@@ -60,6 +64,18 @@ func TestLoad(t *testing.T) {
 				ServerAddr:      ":8080",
 				DatastoreType:   "csv",
 				RateLimitRPS:    0.5,
+				RateLimitBurst:  1,
+				ShutdownTimeout: 10 * time.Second,
+			},
+		},
+		{
+			name: "default burst rounds fractional rps up",
+			env:  map[string]string{"RATE_LIMIT_RPS": "1.5"},
+			want: config.Config{
+				ServerAddr:      ":8080",
+				DatastoreType:   "csv",
+				RateLimitRPS:    1.5,
+				RateLimitBurst:  2,
 				ShutdownTimeout: 10 * time.Second,
 			},
 		},
@@ -74,6 +90,16 @@ func TestLoad(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:    "rate limit NaN",
+			env:     map[string]string{"RATE_LIMIT_RPS": "NaN"},
+			wantErr: true,
+		},
+		{
+			name:    "rate limit infinity",
+			env:     map[string]string{"RATE_LIMIT_RPS": "+Inf"},
+			wantErr: true,
+		},
+		{
 			name:    "rate limit zero",
 			env:     map[string]string{"RATE_LIMIT_RPS": "0"},
 			wantErr: true,
@@ -81,6 +107,21 @@ func TestLoad(t *testing.T) {
 		{
 			name:    "rate limit negative",
 			env:     map[string]string{"RATE_LIMIT_RPS": "-5"},
+			wantErr: true,
+		},
+		{
+			name:    "burst not an integer",
+			env:     map[string]string{"RATE_LIMIT_RPS": "10", "RATE_LIMIT_BURST": "1.5"},
+			wantErr: true,
+		},
+		{
+			name:    "burst zero",
+			env:     map[string]string{"RATE_LIMIT_RPS": "10", "RATE_LIMIT_BURST": "0"},
+			wantErr: true,
+		},
+		{
+			name:    "burst negative",
+			env:     map[string]string{"RATE_LIMIT_RPS": "10", "RATE_LIMIT_BURST": "-2"},
 			wantErr: true,
 		},
 		{

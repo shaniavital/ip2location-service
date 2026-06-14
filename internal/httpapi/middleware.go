@@ -31,6 +31,9 @@ func rateLimit(limiter Limiter, next http.Handler) http.Handler {
 // instead of a dropped connection, and logs the cause. It re-panics on
 // http.ErrAbortHandler, which is the documented way to abort a handler silently.
 func recoverPanic(logger *slog.Logger, next http.Handler) http.Handler {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			rv := recover()
@@ -41,6 +44,9 @@ func recoverPanic(logger *slog.Logger, next http.Handler) http.Handler {
 				panic(rv) // let the server handle its own abort sentinel
 			}
 			logger.Error("recovered from panic", "panic", rv, "method", r.Method, "path", r.URL.Path)
+			if rec, ok := w.(*statusRecorder); ok && rec.wrote {
+				return
+			}
 			writeError(w, http.StatusInternalServerError, "internal server error")
 		}()
 		next.ServeHTTP(w, r)
@@ -50,6 +56,9 @@ func recoverPanic(logger *slog.Logger, next http.Handler) http.Handler {
 // requestLog emits one structured log line per request, including the response
 // status and the time taken.
 func requestLog(logger *slog.Logger, next http.Handler) http.Handler {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
@@ -76,14 +85,17 @@ type statusRecorder struct {
 }
 
 func (r *statusRecorder) WriteHeader(code int) {
-	if !r.wrote {
-		r.status = code
-		r.wrote = true
+	if r.wrote {
+		return
 	}
+	r.status = code
+	r.wrote = true
 	r.ResponseWriter.WriteHeader(code)
 }
 
 func (r *statusRecorder) Write(b []byte) (int, error) {
-	r.wrote = true // an implicit 200 if WriteHeader was never called; status already defaults to 200
+	if !r.wrote {
+		r.WriteHeader(http.StatusOK)
+	}
 	return r.ResponseWriter.Write(b)
 }

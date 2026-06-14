@@ -8,11 +8,11 @@ hand-rolled rate limiter and a swappable datastore.
 | Area | Decision | One-line rationale |
 |---|---|---|
 | **Data model** | Range-based CSV + binary search over `netip.Addr` | Matches how real GeoIP data is structured; `O(log n)` lookup; gaps → clean 404. |
-| **Rate limiter** | Token bucket, lazy refill, injected clock, `capacity = RPS` | Industry standard (what `x/time/rate` does, which is banned); smooth; `O(1)`; testable. |
+| **Rate limiter** | Token bucket, lazy refill, injected clock, configurable burst | Industry standard (what `x/time/rate` does, which is banned); smooth; `O(1)`; testable. |
 | **Limiter scope** | Global (one bucket), behind an `Allow() bool` interface | Literal reading of the spec (one limit, one env var); per-client is a documented extension. |
 | **Config** | Env vars → validated `Config` struct, fail-fast at boot | 12-factor; bad config never reaches runtime. |
 | **Extensibility** | `Locator` interface + factory `switch` on `DATASTORE_TYPE` | Add a DB = implement interface + one case. |
-| **HTTP** | stdlib `net/http`, Go 1.22+ method-aware `ServeMux` | No router dependency. |
+| **HTTP** | stdlib `net/http`, Go 1.22+ method-aware `ServeMux` plus JSON catch-all | No router dependency; router-level errors keep the JSON error contract. |
 | **Dependencies** | Zero external (stdlib only, incl. `testing`, `log/slog`) | Easiest to defend; no supply chain. |
 | **Polish** | Server timeouts, graceful shutdown, panic recovery, slog + request logging, `ctx` in interface | Each maps to a concrete prod failure mode; all stdlib. |
 
@@ -25,11 +25,10 @@ internal/geo/location.go      # Location type, Locator interface, ErrNotFound
 internal/geo/csv.go           # range-based CSV store (sort + binary search)
 internal/geo/factory.go       # New(cfg) → Locator, switch on type
 internal/ratelimit/bucket.go  # token bucket + injectable clock
-internal/ratelimit/middleware.go  # 429 middleware around an Allow() bool
 internal/httpapi/router.go    # build the mux + middleware chain
 internal/httpapi/handler.go   # find-country handler, /healthz
 internal/httpapi/errors.go    # JSON error helper, status mapping
-internal/httpapi/middleware.go    # panic-recovery, request logging
+internal/httpapi/middleware.go    # rate limiting, panic recovery, request logging
 testdata/ip-ranges.csv        # sample data
 README.md                     # run instructions + design write-up
 ```
@@ -43,8 +42,9 @@ one job per package.
 |---|---|---|---|
 | `SERVER_ADDR` | no | `:8080` | listen address |
 | `DATASTORE_TYPE` | no | `csv` | selects the `Locator` implementation |
-| `DATASTORE_PATH` | yes (for csv) | — | path to the data file |
-| `RATE_LIMIT_RPS` | yes | — | must be `> 0`; refill rate and default burst |
+| `DATASTORE_DSN` | yes (for csv) | — | path to the data file |
+| `RATE_LIMIT_RPS` | yes | — | must be `> 0`; token refill rate |
+| `RATE_LIMIT_BURST` | no | `ceil(RATE_LIMIT_RPS)`, minimum `1` | maximum burst size |
 | `SHUTDOWN_TIMEOUT` | no | `10s` | grace period for in-flight requests |
 
 Invalid/missing required values → log and exit non-zero before the server starts.
@@ -87,7 +87,8 @@ type TokenBucket struct {
 func (b *TokenBucket) Allow() bool   // lazy refill, then try to spend one token
 ```
 
-- `capacity = RPS` (one second of burst headroom).
+- `RATE_LIMIT_RPS` controls refill speed; `RATE_LIMIT_BURST` controls capacity.
+- Default burst is one second of headroom: `ceil(RATE_LIMIT_RPS)`, with a minimum of 1.
 - **Middleware** wraps any `interface{ Allow() bool }`: on `false` → `429` with the JSON error
   body + `Retry-After: 1`. Keeping it behind the interface makes per-client a clean later swap.
 
@@ -107,8 +108,8 @@ func (b *TokenBucket) Allow() bool   // lazy refill, then try to spend one token
 **Health:** `GET /healthz` → `200 ok` (liveness).
 
 **Middleware chain (outermost → innermost):**
-`recover → request-logging → rate-limit → mux`
-(recover catches everything; logging records 429s too; rate-limit guards the handler.)
+`request-logging → recover → mux`
+(logging records 429s and recovered 500s; rate-limit is applied per-route to the API handler.)
 
 Handler maps errors with `errors.Is(err, geo.ErrNotFound)`; input is validated before the
 lookup so 400 vs 404 is unambiguous.

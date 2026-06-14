@@ -33,12 +33,25 @@ func WithClock(now func() time.Time) Option {
 	return func(b *TokenBucket) { b.now = now }
 }
 
+// WithCapacity overrides the maximum number of tokens the bucket can hold. It is
+// the limiter's burst size: once the bucket is full, that many requests can pass
+// immediately before refill time matters.
+func WithCapacity(capacity float64) Option {
+	return func(b *TokenBucket) {
+		b.capacity = capacity
+		if b.capacity < 1 {
+			b.capacity = 1
+		}
+	}
+}
+
 // NewTokenBucket returns a limiter that permits ratePerSec requests/second.
 //
-// The burst capacity is one second's worth of tokens (ratePerSec), with a floor
-// of 1 so that fractional rates still work — e.g. a rate of 0.5 accumulates a
-// single token every two seconds rather than never reaching one. The bucket
-// starts full, allowing an initial burst up to capacity.
+// The default burst capacity is one second's worth of tokens (ratePerSec), with
+// a floor of 1 so that fractional rates still work — e.g. a rate of 0.5
+// accumulates a single token every two seconds rather than never reaching one.
+// WithCapacity can override that default. The bucket starts full, allowing an
+// initial burst up to capacity.
 func NewTokenBucket(ratePerSec float64, opts ...Option) *TokenBucket {
 	capacity := ratePerSec
 	if capacity < 1 {
