@@ -252,4 +252,7 @@ golangci-lint run ./...
   data and validation assume a single address family per file.
 - **A real GeoIP datastore** (MaxMind / IP2Location / SQL) behind the same
   `Locator` interface, with connection cleanup on shutdown.
+- **A caching `Locator`** decorating a network-backed datastore (bounded LRU +
+  TTL). Not worth it for the in-memory CSV store, whose lookup is already an
+  `O(log n)` binary search — a cache only pays off in front of a slow store.
 - A readiness probe distinct from liveness, request-ID/tracing, and a container image.
